@@ -92,7 +92,8 @@ class Links(list):
 
         Args:
             data (sequence): Sequence of dictionaries representing Link objects.
-            validate (bool): If True, validates against JSONSchema.
+
+            validate (bool): If `True`, validate the Link document with JSON Schema. Default is `False`.
         """
         if not isinstance(data, collections.abc.Sequence):
             raise ValueError('data parameter must be a sequence.')
@@ -139,8 +140,10 @@ class Catalog(dict):
     def __init__(self, data=None, validate=False):
         """Initialize instance with dictionary data.
 
-        :param data: Dict with catalog metadata.
-        :param validate: true if the Catalog should be validate using its jsonschema. Default is False.
+        Args:
+            data (dict): Dict with catalog metadata.
+
+            validate (bool): If `True`, validate the Catalog document with JSON Schema. Default is `False`.
         """
         self._validate = validate
         super(Catalog, self).__init__(data or {})
@@ -215,6 +218,14 @@ class Catalog(dict):
 
     @property
     def url(self):
+        """Absolute URL of the catalog (self relation of STAC Spec).
+
+        Returns:
+            str: Absolute Catalog URL
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
         self_link = [link for link in self['links'] if link['rel'] == 'self']
 
         if len(self_link) != 1:
@@ -222,13 +233,16 @@ class Catalog(dict):
 
         return self_link[0]['href']
 
-    # @property
-    # def schema(self):
-    #     """:return: the Catalog jsonschema."""
-    #     return self._schema
-
     @property
     def parent(self):
+        """root entity of the catalog (STAC Catalog or Collection).
+
+        Returns:
+            Catalog or Collection: The root entity of this catalog.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
         resource = self._resource('parent')
 
         if resource and not isinstance(resource, Catalog) and not isinstance(resource, Collection):
@@ -238,6 +252,14 @@ class Catalog(dict):
 
     @property
     def root(self):
+        """root entity of the catalog (STAC Catalog or Collection).
+
+        Returns:
+            Catalog or Collection: The root entity of this catalog.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
         resource = self._resource('root')
 
         if resource and not isinstance(resource, Catalog) and not isinstance(resource, Collection):
@@ -247,23 +269,54 @@ class Catalog(dict):
 
     @property
     def children(self):
-        resources = self._resources('child')
+        """Generator to children STAC entities (Catalog or Collection).
 
-        assert (all(isinstance(r, Catalog) or isinstance(r, Collection)
-                    for r in resources))
+        Yields:
+            Catalog or Collection: Child STAC entity.
 
-        return resources
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        for child in self._resources('child'):
+            assert(isinstance(child, Catalog) or isinstance(child, Collection))
+            yield child
 
     @property
     def items(self):
-        resources = self._resources('item')
+        """Generator to STAC Items entities.
 
-        assert (all(isinstance(r, Item) for r in resources))
+        Yields:
+            Item: STAC Item entity.
 
-        return resources
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        for item in self._resources('item'):
+            assert(isinstance(item, Item))
+            yield item
 
     def _resource(self, rel_type):
-        resources = self._resources(rel_type)
+        """Retrieve STAC Catalog resource based on their relationship type.
+
+        Args:
+            rel_type (str): String with a STAC Spec valid relationship type (e.g. root, parent)
+
+        Returns:
+            None or object: Returns None if no object with the specified relationship is identified or
+            an object of the type found in the relation (e.g. STAC Item, STAC Catalog).
+
+        Raises:
+            RuntimeError: When more than one link of type `rel_type` is identified.
+
+        Note:
+            The types returned by this method are assumed to be unique, and cannot return a list of values. For example,
+             an object with `root` relation can be retrieved with this method, since in the catalog, only one object
+             with this relation is expected.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        resources = list(self._resources(rel_type))
 
         if len(resources) == 0:
             return None
@@ -274,24 +327,42 @@ class Catalog(dict):
         return resources[0]
 
     def _resources(self, rel_type):
+        """Retrieve STAC Catalog resources based on their relationship type.
+
+        Args:
+            rel_type (str): String with a STAC Spec valid relationship type (e.g. root, parent)
+
+        Yields:
+            None or object: Yields None if no object with the specified relationship is identified or
+            an object of the type found in the relation (e.g. STAC Item, STAC Catalog).
+
+        Note:
+            Unlike the `_resource` method, this method allows multiple objects to be returned from the search.
+            For example, retrieving objects with `children` relations which can return multiple objects,
+            can be done with this method.
+
+        See:
+            Relationship types: https://github.com/radiantearth/stac-spec/blob/master/catalog-spec/catalog-spec.md#relation-types
+        """
         links = [link for link in self['links'] if link['rel'] == rel_type]
 
-        resources = []
-
         for link in links:
-
             doc = Utils._get(link['href'])
 
             if 'type' in doc:
-                resources.append(resource_factory(doc['type'], doc))
+                resource = resource_factory(doc['type'], doc)
             else:
                 # figure out the returned object from the followed link
-                resources.append(Collection(doc)
-                                 if {'extent', 'providers', 'properties'} & set(doc.keys())
-                                 else Catalog(doc)
-                                 )
+                resource = (Collection(doc)
+                            if {'extent', 'providers', 'properties'} & set(doc.keys())
+                            else Catalog(doc))
 
-        return resources
+            yield resource
+
+    # @property
+    # def schema(self):
+    #     """:return: the Catalog jsonschema."""
+    #     return self._schema
 
 
 class Collection(dict):
@@ -331,6 +402,7 @@ class ItemCollection(dict):
 
 
 def resource_factory(resource_type, data):
+    # ToDo: Review this factory.
     if resource_type == 'Catalog':
         return Catalog(data)
     elif resource_type == 'Collection':
@@ -373,26 +445,39 @@ def catalog(url):
     return Catalog(doc)
 
 
-url = 'https://earth-search.aws.element84.com/v0/'
+if __name__ == '__main__':
+    # url = 'https://earth-search.aws.element84.com/v0/'
+    url = 'https://brazildatacube.dpi.inpe.br/stac/'
 
-cat = catalog(url)
-print(cat.links._repr_html_())
+    cat = catalog(url)
+    print(cat.links._repr_html_())
 
-# links = cat.links
+    links = cat.links
 
-# for l in links:
-#     print(l)
-#     print(type(l))
-#
-# print(links[1:])
-# print(type(links[1:]))
+    for l in links:
+        print(l)
+        print(type(l))
 
-from pprint import pprint
+    print(links[1:])
+    print(type(links[1:]))
 
-# pprint(cat.url)
-# pprint(cat.parent)
-# pprint(cat.root)
-# pprint(cat.children)
-# pprint(cat.items)
+    from pprint import pprint
 
-# service = stac.service('url')
+    print("URL")
+    pprint(cat.url)
+
+    print("Parent")
+    pprint(cat.parent)
+
+    print("root")
+    pprint(cat.root)
+
+    print("Children")
+    for child in cat.children:
+        pprint(child)
+
+    print("Items")
+    for item in cat.items:
+        pprint(item)
+
+    # service = stac.service('url')
