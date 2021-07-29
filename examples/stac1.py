@@ -228,15 +228,6 @@ class Catalog(dict):
     #     return self._schema
 
     @property
-    def children(self):
-        resources = self._resources('child')
-
-        assert (all(isinstance(r, Catalog) or isinstance(r, Collection)
-                    for r in resources))
-
-        return resources
-
-    @property
     def parent(self):
         resource = self._resource('parent')
 
@@ -253,6 +244,15 @@ class Catalog(dict):
             raise RuntimeError('The returned resource is not a Catalog or Collection.')
 
         return resource
+
+    @property
+    def children(self):
+        resources = self._resources('child')
+
+        assert (all(isinstance(r, Catalog) or isinstance(r, Collection)
+                    for r in resources))
+
+        return resources
 
     @property
     def items(self):
