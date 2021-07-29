@@ -1,0 +1,9 @@
+<tr>
+    <td>
+        <a href="{{link['href']}}" target="_blank">
+            {{link['title'] if 'title' in link else link['href'] | truncate(40, True)}}
+        </a>
+    </td>
+    <td>{{link['rel']}}</td>
+    <td>{{link.get('type', '')}}</td>
+</tr>

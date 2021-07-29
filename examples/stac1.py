@@ -1,4 +1,13 @@
+import collections.abc
+
+import jinja2
 import requests
+
+from pkg_resources import resource_filename as _resource_filename
+
+
+_template_loader = jinja2.FileSystemLoader(searchpath=_resource_filename(__name__, 'templates/'))
+_template_env = jinja2.Environment(loader=_template_loader)
 
 
 class Utils:
@@ -29,36 +38,99 @@ class Utils:
 
         return response.json()
 
+    @staticmethod
+    def render_html(template_name, **kwargs):  # pragma: no cover
+        """Render Jinja2 HTML template."""
+        template = _template_env.get_template(template_name)
+        return template.render(**kwargs)
+
 
 class Link(dict):
-    """Link object."""
+    """A reference to other document according to the STAC specification."""
 
     def __init__(self, data):
         """Initialize instance with dictionary data.
 
-        :param data: Dict with Link metadata.
+        Args:
+            data (dict): Dict with Link metadata.
         """
         super(Link, self).__init__(data or {})
 
     @property
-    def rel(self):
-        """:return: the Link relation."""
-        return self['rel']
-
-    @property
     def href(self):
-        """:return: the Link url."""
+        """URL associated to the Link."""
         return self['href']
 
     @property
+    def rel(self):
+        """Relationship with the linked document. """
+        return self['rel']
+
+    @property
     def type(self):
-        """:return: the type of the Link object."""
+        """Media type of the referenced entity."""
         return self['type']
 
     @property
     def title(self):
-        """:return: the title of the Link object."""
+        """A human readable title to be used in rendered displays of the link."""
         return self['title']
+
+    def _repr_html_(self): # pragma: no cover
+        """Display the Link as HTML.
+
+        This integrates a rich display in IPython.
+        """
+        return Utils.render_html('link.html', link=self)
+
+
+class Links(list):
+    """A list of references to other documents according to the STAC specification."""
+
+    def __init__(self, data=None, validate=False):
+        """Create a new list of references to other documents.
+
+        Args:
+            data (sequence): Sequence of dictionaries representing Link objects.
+            validate (bool): If True, validates against JSONSchema.
+        """
+        if not isinstance(data, collections.abc.Sequence):
+            raise ValueError('data parameter must be a sequence.')
+
+        if not all(isinstance(l, (dict, Link)) for l in data):
+            raise ValueError('Sequence elements in data parameter must be a dict or a Link.')
+
+        data = [Link(l) if isinstance(l, dict) else l for l in data]
+
+        super(Links, self).__init__(data)
+
+    def _repr_html_(self): # pragma: no cover
+        """Display the Links as HTML.
+
+        This integrates a rich display in IPython.
+        """
+        return Utils.render_html('links.html', links=self)
+
+    def __getitem__(self, y):
+        """Get Link identified by the key or slice it.
+
+        Returns:
+            Link or Links: A specific Link item or a slice of the Links.
+
+        Example:
+            Get the first link of a catalog:
+            .. doctest::
+                :skipif: STAC_EXAMPLE_URL is None
+                >>> from stac import *
+                >>> service = stac.service(WTSS_EXAMPLE_URL)
+                >>> catalog = service.catalog()
+                >>> links = catalog.links
+                >>> links[0]
+                {...
+        """
+        v = super(Links, self).__getitem__(y)
+
+        return v if isinstance(v, Link) else Links(v)
 
 
 class Catalog(dict):
@@ -131,7 +203,7 @@ class Catalog(dict):
         """A list of references to catalogs, collections or items.
 
         Returns:
-            list: A list of references to catalogs, collections or items.
+            Links: A list of references to catalogs, collections or items.
 
         Raises:
             RuntimeError: If the catalog self link can not be found.
@@ -139,7 +211,7 @@ class Catalog(dict):
         Note:
             A catalog can include a link to itself (relation self or root).
         """
-        return [Link(link) for link in self['links']] if 'links' in self else []
+        return Links(self.get('links'))
 
     @property
     def url(self):
@@ -304,13 +376,23 @@ def catalog(url):
 url = 'https://earth-search.aws.element84.com/v0/'
 
 cat = catalog(url)
+print(cat.links._repr_html_())
+
+# links = cat.links
+
+# for l in links:
+#     print(l)
+#     print(type(l))
+#
+# print(links[1:])
+# print(type(links[1:]))
 
 from pprint import pprint
 
-pprint(cat.url)
-pprint(cat.parent)
-pprint(cat.root)
-pprint(cat.children)
-pprint(cat.items)
+# pprint(cat.url)
+# pprint(cat.parent)
+# pprint(cat.root)
+# pprint(cat.children)
+# pprint(cat.items)
 
 # service = stac.service('url')

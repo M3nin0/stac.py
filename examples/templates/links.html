@@ -1,0 +1,6 @@
+{% extends "table-links.html" %}
+{% block link_rows %}
+    {% for link in links %}
+        {% include 'link-row.html' %}
+    {%- endfor %}
+{%- endblock %}
