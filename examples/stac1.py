@@ -3,8 +3,9 @@ import collections.abc
 import jinja2
 import requests
 
+from enum import Enum
 from pkg_resources import resource_filename as _resource_filename
-
+from shapely.geometry import box as _box
 
 _template_loader = jinja2.FileSystemLoader(searchpath=_resource_filename(__name__, 'templates/'))
 _template_env = jinja2.Environment(loader=_template_loader)
@@ -45,6 +46,25 @@ class Utils:
         return template.render(**kwargs)
 
 
+class RelationType(Enum):
+    SELF = 'self'
+    ROOT = 'root'
+    PARENT = 'parent'
+    CHILD = 'child'
+    ITEM = 'item'
+    LICENSE = 'license'
+    DERIVED_FROM = 'derived_from'
+    ALTERNATE = 'alternate'
+    CANONICAL = 'canonical'
+    VIA = 'via'
+    PREV = 'prev'
+    NEXT = 'next'
+    PREVIEW = 'preview'
+
+    def __str__(self):
+        return self.value
+
+
 class Link(dict):
     """A reference to other document according to the STAC specification."""
 
@@ -64,7 +84,7 @@ class Link(dict):
     @property
     def rel(self):
         """Relationship with the linked document. """
-        return self['rel']
+        return RelationType[self['rel']]
 
     @property
     def type(self):
@@ -75,6 +95,45 @@ class Link(dict):
     def title(self):
         """A human readable title to be used in rendered displays of the link."""
         return self['title']
+
+    def resource(self):
+        """Resolve the link and retrieve the associated resource.
+
+        This methos works as a factory for Catalogs, Collections,
+        Item (Feature), and Item collection (Feature Collection)
+
+        Returns:
+            Catalog, Collection, Item, ItemCollection, dict: Any STAC object or a dictionary if
+                the resource type is not known.
+        """
+        # TODO: pass mime-type
+        # TODO: create an extesible resource_factory
+        # TODO: allow JSONSchema validation
+        data = Utils._get(self['href'])
+
+        if 'type' in data:
+            # the type field should be present in:
+            # - Item (Feature);
+            # - ItemCollection (FeatureCollection);
+            # - Catalog (for STAC 1.0.0-rc1 or above);
+            # - Collection (for STAC 1.0.0-rc1 or above)
+            if self['rel'] == 'Catalog':
+                return Catalog(data)
+            elif self['rel'] == 'Collection':
+                return Collection(data)
+            elif self['rel'] == 'Feature':
+                return Item(data)
+            elif self['rel'] == 'FeatureCollection':
+                return ItemCollection(data)
+        else:
+            # try to figure out the returned object from the followed link
+            if {'extent', 'providers', 'properties'} & set(data.keys()):
+                return Collection(data)
+            elif {'stac_version', 'description', 'links'}.issubset(set(data.keys())):
+                return Catalog(data)
+
+        #raise RuntimeError(f'Unknow relation type: {self["rel"]}.')
+        return data
 
     def _repr_html_(self): # pragma: no cover
         """Display the Link as HTML.
@@ -133,6 +192,371 @@ class Links(list):
 
         return v if isinstance(v, Link) else Links(v)
 
+    def resources(self, ):
+
+
+class Provider(dict):
+    """A organization or person that captures or processes the content of a Collection."""
+
+    def __init__(self, data):
+        """Initialize instance with dictionary data.
+
+        Args:
+            data (dict): Dict with provider metadata.
+        """
+        super(Provider, self).__init__(data or {})
+
+    @property
+    def name(self):
+        """The data provider name."""
+        return self['name']
+
+    @property
+    def description(self):
+        """Detailed multi-line description about the data provider.
+
+        Returns:
+            str: A description of the data provider.
+
+        Note:
+            CommonMark 0.29 syntax MAY be used for rich text representation.
+        """
+        return self.get('description')
+
+    @property
+    def roles(self):
+        """Provider roles."""
+        return self.get('roles')
+
+    @property
+    def url(self):
+        """A url for more detail about the data provider."""
+        return self.get('url')
+
+    def _repr_html_(self): # pragma: no cover
+        """Display the Provider as HTML.
+
+        This integrates a rich display in IPython.
+        """
+        return Utils.render_html('provider.html', provider=self)
+
+
+class Providers(list):
+    """A list of data providers."""
+
+    def __init__(self, data=None, validate=False):
+        """Create a new list of data providers.
+
+        Args:
+            data (sequence): Sequence of dictionaries representing Provider objects.
+
+            validate (bool): If `True`, validate the providers document with JSON Schema. Default is `False`.
+        """
+        if not isinstance(data, collections.abc.Sequence):
+            raise ValueError('data parameter must be a sequence.')
+
+        if not all(isinstance(l, (dict, Provider)) for l in data):
+            raise ValueError('Sequence elements in data parameter must be a dict or a Provider.')
+
+        data = [Provider(p) if isinstance(p, dict) else p for p in data]
+
+        super(Providers, self).__init__(data)
+
+    def _repr_html_(self): # pragma: no cover
+        """Display the Links as HTML.
+
+        This integrates a rich display in IPython.
+        """
+        return Utils.render_html('providers.html', providers=self)
+
+    def __getitem__(self, y):
+        """Get Provider identified by the key or slice it.
+
+        Returns:
+            Provider or Providers: A specific Provider item or a slice of the Providers list.
+        """
+        v = super(Providers, self).__getitem__(y)
+
+        return v if isinstance(v, Provider) else Providers(v)
+
+
+class Extent():
+    """The Extent object."""
+
+    def __init__(self, data):
+        """Initialize instance with dictionary data.
+
+        Args:
+            data (dict): Dict with spatial and temporal metadata.
+        """
+        self._spatial = data['spatial']['bbox']
+
+        interval = data['temporal']['interval']
+        self._temporal = [i for i in interval]
+
+    @property
+    def spatial(self):
+        """The spatial extent.
+
+        Tip:
+
+            You can create polygons from the spatial extent by
+            using Shapely:
+
+            .. code:: python
+
+                >>> from shapely.geometry import box
+                >>> [box(*b) for b in extent.spatial]
+        """
+        return self._spatial
+
+    @property
+    def temporal(self):
+        """The temporal extent."""
+        return self._temporal
+
+    def _repr_html_(self): # pragma: no cover
+        """Display the Links as HTML.
+
+        This integrates a rich display in IPython.
+        """
+        return Utils.render_html('extent.html', extent=self)
+
+
+class BaseContainer(dict):
+    """A base class for STAC Catalogs and Collections."""
+
+    def __init__(self, data=None, validate=False):
+        """Initialize instance with dictionary data.
+
+        Args:
+            data (dict): Dict with catalog metadata.
+
+            validate (bool): If `True`, validate the catalog/collection document with JSON Schema.
+                             Default is `False`.
+        """
+        self._validate = validate
+        super(BaseContainer, self).__init__(data or {})
+
+    @property
+    def stac_version(self):
+        """The STAC version the catalog/collection implements.
+
+        Returns:
+            str: The STAC version the catalog/collection implements.
+        """
+        return self['stac_version']
+
+    @property
+    def stac_extensions(self):
+        """A list of extension identifiers the catalog/collection implements.
+
+        Returns:
+            list: A list of extension identifiers the catalog/collection implements.
+        """
+        return self.get('stac_extensions', [])
+
+    @property
+    def id(self):
+        """Identifier for the catalog/collection.
+
+        Returns:
+            str:  Identifier for the catalog/collection.
+        """
+        return self['id']
+
+    @property
+    def title(self):
+        """A short descriptive one-line title for the catalog/collection.
+
+        Returns:
+            str: A short descriptive one-line title for the catalog/collection.
+        """
+        return self.get('title', None)
+
+    @property
+    def description(self):
+        """Detailed multi-line description to fully explain the catalog/collection.
+
+        Returns:
+            str: The catalog/collection description.
+
+        Note:
+            CommonMark 0.29 syntax MAY be used for rich text representation.
+        """
+        return self['description']
+
+    @property
+    def links(self, rel_type=None):
+        """A list of references to catalogs, collections or items.
+
+        Args:
+            rel_type (RelationType): Relation type.
+
+        Returns:
+            Links: A list of references to catalogs, collections, items,
+                   license informtaion, or data producr derivation.
+
+        Note:
+            A catalog/collection can include a link to itself (relation self).
+        """
+        if rel_type:
+            selected_links = [link for link in self['links'] if link['rel'] == rel_type.value]
+            return Links(selected_links)
+        else:
+            return Links(self.get('links', []))
+
+    @property
+    def url(self):
+        """URL of the catalog/collection (self relation of STAC Spec).
+
+        Returns:
+            str or None: Absolute catalog/collection URL
+
+        Raises:
+            RuntimeError: If no self link is found or if multiple links
+                          with self relationship are found.
+        See:
+            STAC Relationship types:
+
+            - https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+
+            - https://github.com/radiantearth/stac-spec/blob/master/collection-spec/collection-spec.md#relation-types
+        """
+        self_link = self.links(RelationType.SELF)
+
+        print(self.__class__.__name__)
+
+        if len(self_link) == 1:
+            return self_link[0]['href']
+        elif not self_link:
+            return None
+
+        raise RuntimeError('Multiple self links found.')
+
+    @property
+    def parent(self):
+        """The parent entity of the catalog/collection.
+
+        Returns:
+            Catalog or Collection: The parent entity of this catalog/collection.
+
+        Raises:
+            RuntimeError: If the parent object is not a Catalog or Collection.
+
+        See:
+            STAC Relationship types:
+
+            - https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+
+            - https://github.com/radiantearth/stac-spec/blob/master/collection-spec/collection-spec.md#relation-types
+        """
+        resource = self._resource(RelationType.PARENT)
+
+        if not isinstance(resource, (Catalog, Collection)):
+            raise RuntimeError('The returned resource is not a Catalog or Collection.')
+
+        return resource
+
+    @property
+    def root(self):
+        """The root entity of the catalog/collection (STAC Catalog or Collection).
+
+        Returns:
+            Catalog or Collection: The root entity of this catalog.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        resource =  self._resource(RelationType.ROOT)
+
+        if not isinstance(resource, (Catalog, Collection)):
+            raise RuntimeError('The returned resource is not a Catalog or Collection.')
+
+        return resource
+
+    @property
+    def children(self):
+        """Generator to children STAC entities (Catalog or Collection).
+
+        Yields:
+            Catalog or Collection: Child STAC entity.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        for child in self._resources(RelationType.CHILD):
+            assert(isinstance(child, (Catalog, Collection)))
+            yield child
+
+    @property
+    def items(self):
+        """Generator to STAC Items entities.
+
+        Yields:
+            Item: STAC Item entity.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        for item in self._resources(RelationType.ITEM):
+            assert(isinstance(item, Item))
+            yield item
+
+    def _resource(self, rel_type=RelationType.PARENT):
+        """Retrieve STAC Catalog/Collection resource based on their relationship type.
+
+        Args:
+            rel_type (str): String with a STAC Spec valid relationship type (e.g. root, parent)
+
+        Returns:
+            None or object: Returns None if no object with the specified relationship is identified or
+            an object of the type found in the relation (e.g. STAC Item, STAC Catalog).
+
+        Raises:
+            RuntimeError: When more than one link of type `rel_type` is identified.
+
+        Note:
+            The types returned by this method are assumed to be unique, and cannot return a list of values. For example,
+             an object with `root` relation can be retrieved with this method, since in the catalog, only one object
+             with this relation is expected.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        resources = list(self._resources(rel_type))
+
+        if len(resources) == 0:
+            return None
+
+        if len(resources) > 1:
+            raise RuntimeError(f'Found more than one link of type: {rel_type.data}.')
+
+        return resources[0]
+
+    def _resources(self, rel_type):
+        """Retrieve STAC Catalog resources based on their relationship type.
+
+        Args:
+            rel_type (str): String with a STAC Spec valid relationship type (e.g. root, parent)
+
+        Yields:
+            None or object: Yields None if no object with the specified relationship is identified or
+            an object of the type found in the relation (e.g. STAC Item, STAC Catalog).
+
+        Note:
+            Unlike the `_resource` method, this method allows multiple objects to be returned from the search.
+            For example, retrieving objects with `children` relations which can return multiple objects,
+            can be done with this method.
+
+        See:
+            Relationship types: https://github.com/radiantearth/stac-spec/blob/master/catalog-spec/catalog-spec.md#relation-types
+        """
+        selected_links = self.links(rel_type)
+
+        for link in selected_links:
+            yield link.resource()
+
 
 class Catalog(dict):
     """The STAC Catalog."""
@@ -147,11 +571,6 @@ class Catalog(dict):
         """
         self._validate = validate
         super(Catalog, self).__init__(data or {})
-
-        # self._schema = json.loads(resource_string(__name__, f'jsonschemas/{self.stac_version}/catalog.json'))
-
-        # if self._validate:
-        #     Utils.validate(self)
 
     @property
     def stac_version(self):
@@ -187,14 +606,14 @@ class Catalog(dict):
         Returns:
             str: A short descriptive one-line title for the Catalog.
         """
-        return self['title'] if 'title' in self else None
+        return self.get('title', None)
 
     @property
     def description(self):
         """Detailed multi-line description to fully explain the Catalog.
 
         Returns:
-            str: A short descriptive one-line title for the Catalog.
+            str: The catalog description.
 
         Note:
             CommonMark 0.29 syntax MAY be used for rich text representation.
@@ -214,7 +633,7 @@ class Catalog(dict):
         Note:
             A catalog can include a link to itself (relation self or root).
         """
-        return Links(self.get('links'))
+        return Links(self.get('links', []))
 
     @property
     def url(self):
@@ -278,7 +697,7 @@ class Catalog(dict):
             STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
         """
         for child in self._resources('child'):
-            assert(isinstance(child, Catalog) or isinstance(child, Collection))
+            assert(isinstance(child, (Catalog, Collection)))
             yield child
 
     @property
@@ -350,6 +769,11 @@ class Catalog(dict):
             doc = Utils._get(link['href'])
 
             if 'type' in doc:
+                # the type field should be present in:
+                # - Item (Feature);
+                # - ItemCollection (FeatureCollection);
+                # - Catalog (for STAC 1.0.0-rc1 or above);
+                # - Collection (for STAC 1.0.0-rc1 or above)
                 resource = resource_factory(doc['type'], doc)
             else:
                 # figure out the returned object from the followed link
@@ -359,10 +783,12 @@ class Catalog(dict):
 
             yield resource
 
-    # @property
-    # def schema(self):
-    #     """:return: the Catalog jsonschema."""
-    #     return self._schema
+    def _repr_html_(self): # pragma: no cover
+        """Display the Catalog as HTML.
+
+        This integrates a rich display in IPython.
+        """
+        return Utils.render_html('catalog.html', catalog=self)
 
 
 class Collection(dict):
@@ -370,11 +796,268 @@ class Collection(dict):
     def __init__(self, data=None, validate=False):
         """Initialize instance with dictionary data.
 
-        :param data: Dict with catalog metadata.
-        :param validate: true if the Catalog should be validate using its jsonschema. Default is False.
+        Args:
+            data (dict): Dict with collection metadata.
+
+            validate (bool): If `True`, validate the Collection document with JSON Schema. Default is `False`.
         """
         self._validate = validate
         super(Collection, self).__init__(data or {})
+
+    def _repr_html_(self): # pragma: no cover
+        """Display the Collection as HTML.
+
+        This integrates a rich display in IPython.
+        """
+        return Utils.render_html('collection.html', collection=self)
+
+    @property
+    def stac_version(self):
+        """The STAC version the Collection implements.
+
+        Returns:
+            str: The STAC version the Collection implements.
+        """
+        return self['stac_version']
+
+    @property
+    def stac_extensions(self):
+        """A list of extension identifiers the Collection implements.
+
+        Returns:
+            list: A list of extension identifiers the Collection implements.
+        """
+        return self.get('stac_extensions', [])
+
+    @property
+    def id(self):
+        """Identifier for the Collection.
+
+        Returns:
+            str:  Identifier for the Collection.
+        """
+        return self['id']
+
+    @property
+    def title(self):
+        """A short descriptive one-line title for the Collection.
+
+        Returns:
+            str: A short descriptive one-line title for the Collection.
+        """
+        return self.get('title', None)
+
+    @property
+    def description(self):
+        """Detailed multi-line description to fully explain the Collection.
+
+        Returns:
+            str: A short descriptive one-line title for the Collection.
+
+        Note:
+            CommonMark 0.29 syntax MAY be used for rich text representation.
+        """
+        return self['description']
+
+    @property
+    def keywords(self):
+        """List of keywords describing the Collection.
+
+        Returns:
+            list: A list of of keywords describing the Collection.
+        """
+        return self.get('keywords', [])
+
+    @property
+    def license(self):
+        """Collection's license.
+
+        Returns:
+            str: Collection's license.
+        """
+        return self['license']
+
+    @property
+    def providers(self):
+        """The list of data providers."""
+        return Providers(self.get('providers', []))
+
+    @property
+    def extent(self):
+        """The Spatial and temporal extents."""
+        return Extent(self.get('extent'))
+
+    @property
+    def summaries(self):
+        pass
+
+    @property
+    def links(self):
+        """A list of references to catalogs, collections, items or any other resource.
+
+        Returns:
+            Links: A list of references to catalogs, collections, items or any other resource.
+
+        Note:
+            A collection can include a link to itself (relation self).
+        """
+        return Links(self.get('links'))
+
+    @property
+    def assets(self):
+        pass
+
+    @property
+    def url(self):
+        """Absolute URL of the collection (self relation of STAC Spec).
+
+        Returns:
+            str: Absolute Collection URL
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/collection-spec/collection-spec.md#relation-types.
+        """
+        self_link = [link for link in self['links'] if link['rel'] == 'self']
+
+        if len(self_link) != 1:
+            raise RuntimeError('Could not determine the collection self link.')
+
+        return self_link[0]['href']
+
+    @property
+    def parent(self):
+        """root entity of the catalog (STAC Catalog or Collection).
+
+        Returns:
+            Catalog or Collection: The root entity of this catalog.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        resource = self._resource('parent')
+
+        if resource and not isinstance(resource, (Catalog, Collection)):
+            raise RuntimeError('The returned resource is not a Catalog or Collection.')
+
+        return resource
+
+    @property
+    def root(self):
+        """root entity of the collection (STAC Catalog or Collection).
+
+        Returns:
+            Catalog or Collection: The root entity of this collection.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        resource = self._resource('root')
+
+        if resource and not isinstance(resource, (Catalog, Collection)):
+            raise RuntimeError('The returned resource is not a Catalog or Collection.')
+
+        return resource
+
+    @property
+    def children(self):
+        """Generator to children STAC entities (Catalog or Collection).
+
+        Yields:
+            Catalog or Collection: Child STAC entity.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        for child in self._resources('child'):
+            assert (isinstance(child, (Catalog, Collection)))
+            yield child
+
+    @property
+    def items(self):
+        """Generator to STAC Items entities.
+
+        Yields:
+            Item: STAC Item entity.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        for item in self._resources('item'):
+            assert (isinstance(item, Item))
+            yield item
+
+    @property
+    def derived_from(self):
+        pass
+
+    def _resource(self, rel_type):
+        """Retrieve STAC Catalog resource based on their relationship type.
+
+        Args:
+            rel_type (str): String with a STAC Spec valid relationship type (e.g. root, parent)
+
+        Returns:
+            None or object: Returns None if no object with the specified relationship is identified or
+            an object of the type found in the relation (e.g. STAC Item, STAC Catalog).
+
+        Raises:
+            RuntimeError: When more than one link of type `rel_type` is identified.
+
+        Note:
+            The types returned by this method are assumed to be unique, and cannot return a list of values. For example,
+             an object with `root` relation can be retrieved with this method, since in the catalog, only one object
+             with this relation is expected.
+
+        See:
+            STAC Relationship types: https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+        """
+        resources = list(self._resources(rel_type))
+
+        if len(resources) == 0:
+            return None
+
+        if len(resources) > 1:
+            raise RuntimeError(f'Found more than one link of type: {rel_type}.')
+
+        return resources[0]
+
+    def _resources(self, rel_type):
+        """Retrieve STAC Catalog resources based on their relationship type.
+
+        Args:
+            rel_type (str): String with a STAC Spec valid relationship type (e.g. root, parent)
+
+        Yields:
+            None or object: Yields None if no object with the specified relationship is identified or
+            an object of the type found in the relation (e.g. STAC Item, STAC Catalog).
+
+        Note:
+            Unlike the `_resource` method, this method allows multiple objects to be returned from the search.
+            For example, retrieving objects with `children` relations which can return multiple objects,
+            can be done with this method.
+
+        See:
+            Relationship types: https://github.com/radiantearth/stac-spec/blob/master/catalog-spec/catalog-spec.md#relation-types
+        """
+        links = [link for link in self['links'] if link['rel'] == rel_type]
+
+        for link in links:
+            doc = Utils._get(link['href'])
+
+            if 'type' in doc:
+                # the type field should be present in:
+                # - Item (Feature);
+                # - ItemCollection (FeatureCollection);
+                # - Catalog (for STAC 1.0.0-rc1 or above);
+                # - Collection (for STAC 1.0.0-rc1 or above)
+                resource = resource_factory(doc['type'], doc)
+            else:
+                # figure out the returned object from the followed link
+                resource = (Collection(doc)
+                            if {'extent', 'providers', 'properties'} & set(doc.keys())
+                            else Catalog(doc))
+
+            yield resource
 
 
 class Item(dict):
@@ -399,18 +1082,6 @@ class ItemCollection(dict):
         """
         self._validate = validate
         super(ItemCollection, self).__init__(data or {})
-
-
-def resource_factory(resource_type, data):
-    # ToDo: Review this factory.
-    if resource_type == 'Catalog':
-        return Catalog(data)
-    elif resource_type == 'Collection':
-        return Collection(data)
-    elif resource_type == 'Feature':
-        return Item(data)
-    elif resource_type == 'FeatureCollection':
-        return ItemCollection(data)
 
 
 class Service:
@@ -446,38 +1117,41 @@ def catalog(url):
 
 
 if __name__ == '__main__':
-    # url = 'https://earth-search.aws.element84.com/v0/'
-    url = 'https://brazildatacube.dpi.inpe.br/stac/'
+    url = 'https://earth-search.aws.element84.com/v0/'
+    # url = 'https://brazildatacube.dpi.inpe.br/stac/'
 
     cat = catalog(url)
-    print(cat.links._repr_html_())
 
-    links = cat.links
+    print(cat._repr_html_())
 
-    for l in links:
-        print(l)
-        print(type(l))
-
-    print(links[1:])
-    print(type(links[1:]))
-
-    from pprint import pprint
-
-    print("URL")
-    pprint(cat.url)
-
-    print("Parent")
-    pprint(cat.parent)
-
-    print("root")
-    pprint(cat.root)
-
-    print("Children")
-    for child in cat.children:
-        pprint(child)
-
-    print("Items")
-    for item in cat.items:
-        pprint(item)
-
+    # print(cat.links._repr_html_())
+    #
+    # links = cat.links
+    #
+    # for l in links:
+    #     print(l)
+    #     print(type(l))
+    #
+    # print(links[1:])
+    # print(type(links[1:]))
+    #
+    # from pprint import pprint
+    #
+    # print("URL")
+    # pprint(cat.url)
+    #
+    # print("Parent")
+    # pprint(cat.parent)
+    #
+    # print("root")
+    # pprint(cat.root)
+    #
+    # print("Children")
+    # for child in cat.children:
+    #     pprint(child)
+    #
+    # print("Items")
+    # for item in cat.items:
+    #     pprint(item)
+    #
     # service = stac.service('url')
