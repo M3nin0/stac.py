@@ -3,6 +3,7 @@
 from collections import UserDict
 
 from examples._utils import Utils
+from examples.assets import Assets
 from examples.links import Links
 from examples.relation import RelationType
 
@@ -45,15 +46,42 @@ class Item(UserDict):
 
     @property
     def geometry(self):
-        pass
+        """Return the full footprint of the assets represented by this item.
+
+        Returns:
+            shapely.geometry: The footprint of the assets represented as a Shapely Geometry object.
+
+        Raises:
+            ImportError: If Shapely can no be imported.
+        """
+        try:
+            from shapely.geometry import shape
+        except ImportError:
+            raise ImportError('You should install Shapely!')
+
+        return shape(self['geometry'])
 
     @property
     def bbox(self):
-        pass
+        """Return the bounding box of the asset represented by this Item.
+
+        Returns:
+            shapely.geometry: A Shapely Polygon object representing the bounding box.
+
+        Raises:
+            ImportError: If Shapely can no be imported.
+        """
+        try:
+            from shapely.geometry import box
+        except ImportError:
+            raise ImportError('You should install Shapely!')
+
+        return box(*self['bbox'])
 
     @property
     def properties(self):
-        pass
+        """Return the Item properties."""
+        return self['properties']
 
     @property
     def links(self):
@@ -82,7 +110,6 @@ class Item(UserDict):
             Catalog/Collection: The parent Catalog or Collection.
         """
         links = self._links(RelationType.PARENT, single=True)
-
         return links[0].resource() if links else None
 
     @property
@@ -93,7 +120,6 @@ class Item(UserDict):
             Catalog/Collection: The root Catalog or Collection.
         """
         links = self._links(RelationType.CHILD, single=True)
-
         return links[0].resource() if links else None
 
     @property
@@ -111,7 +137,8 @@ class Item(UserDict):
 
     @property
     def assets(self):
-        pass
+        """The list of assets."""
+        return Assets(self['assets'])
 
     @property
     def collection_id(self):

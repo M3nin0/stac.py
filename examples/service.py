@@ -23,11 +23,16 @@ class Service:
         self._url = url
         self._validate = validate
         self._access_token = f'?access_token={access_token}' if access_token else ''
+        self._catalog = None
 
     def catalog(self):
         """Return the STAC catalog associated to the STAC service or URL."""
+        if self._catalog:
+            return self._catalog
+
         data = Utils.get(self._url)
-        return Catalog(data)
+        self._catalog = Catalog(data)
+        return self._catalog
 
     def conformance(self):
         """???"""

@@ -2,8 +2,8 @@
 
 from typing import Union
 
-from examples._base_container import BaseContainer
 from examples.assets import Assets
+from examples.catalog import Catalog
 from examples.extent import Extent
 from examples.providers import Providers
 from examples.relation import RelationType
@@ -12,7 +12,7 @@ from examples.links import Links
 from examples._utils import Utils
 
 
-class Collection(BaseContainer):
+class Collection(Catalog):
     """STAC Collection class."""
 
     def __init__(self, data=None):
@@ -70,7 +70,7 @@ class Collection(BaseContainer):
     @property
     def derived_from(self):
         """STAC Collection that was used as input data in the creation of this Collection"""
-        return
+        pass
 
     def _repr_html_(self): # pragma: no cover
         """Display the Collection as HTML for a rich display in IPython."""

@@ -1,0 +1,23 @@
+{% if catalog.title %}
+<div>
+    <b>Title:</b> {{catalog.title}}
+</div>
+{% endif -%}
+<div>
+    <b>Description:</b> {{catalog.description}}
+</div>
+<div>
+    <b>STAC version:</b> {{catalog.stac_version}}
+</div>
+{% if catalog.stac_extensions %}
+<div>
+    <b>STAC Extensions:</b>
+    <ul>
+        {% for ext in catalog.stac_extensions %}
+        <li>{{ext}}</li>
+        {%- endfor %}
+    </ul>
+</div>
+{% endif -%}
+{% set links = catalog.links %}
+{%- include 'links.html' %}

@@ -2,6 +2,13 @@ from enum import Enum
 
 
 class RelationType(Enum):
+    """
+    For information on the possible relationship types, please, see:
+
+        - https://github.com/radiantearth/stac-spec/blob/v1.0.0/catalog-spec/catalog-spec.md#relation-types
+
+        - https://github.com/radiantearth/stac-spec/blob/v1.0.0/collection-spec/collection-spec.md#relation-types
+    """
 
     ALTERNATE = 'alternate'
     CANONICAL = 'canonical'
