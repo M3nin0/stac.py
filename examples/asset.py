@@ -2,11 +2,12 @@
 according to the STAC specification."""
 
 import collections.abc
+import os
 from collections import UserDict
 
+from tqdm import tqdm
+
 from examples._utils import Utils
-from examples.relation import RelationType
-from examples.resource_factory import ResourceFactory
 
 
 class Asset(UserDict):
@@ -58,3 +59,30 @@ class Asset(UserDict):
     def _repr_html_(self):  # pragma: no cover
         """Display the Asset as HTML for a rich display in IPython."""
         return Utils.render_html('link.html', asset=self)
+
+    def download(self, output_dir=None):  # pragma: no cover
+        """Download the asset to an indicated folder.
+
+        Args:
+            output_dir (str): Directory path to download the asset, if left None, the asset will be
+                              downloaded to the current working directory.
+
+        Returns:
+            str: path to downloaded file.
+        """
+        filename = os.path.basename(self['href'])
+
+        if output_dir:
+            filename = os.path.join(output_dir, filename)
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        response = Utils.stream(self['href'])
+
+        with open(filename, 'wb') as target_file:
+            with tqdm.wrapattr(target_file, 'write', miniters=1,
+                               total=int(response.headers.get('content-length', 0)),
+                               desc=filename) as fout:
+                for chunk in response.iter_content(chunk_size=4096):
+                    fout.write(chunk)
+
+        return filename
