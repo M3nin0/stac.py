@@ -1,9 +1,6 @@
 """This module introduces a base class for STAC Catalogs and Collections."""
 
 from collections import UserDict
-from typing import Generator
-
-from examples.link import Link
 from examples.links import Links
 from examples.relation import RelationType
 
