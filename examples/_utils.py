@@ -26,7 +26,6 @@ class Utils:
             ValueError: If the response body does not contain a valid json.
         """
         response = requests.get(url, params=params)
-
         response.raise_for_status()
 
         content_type = response.headers.get('content-type')
@@ -35,6 +34,26 @@ class Utils:
             raise ValueError('HTTP response is not JSON: Content-Type: {}'.format(content_type))
 
         return response.json()
+
+    @staticmethod
+    def stream(url, **kwargs):
+        """Create a HTTP GET stream to a remote file based on url.
+
+        Args:
+            url (str): File URL
+
+            **kwargs (dict): Extra parameters to the `requests.request` function.
+
+        Returns:
+            requests.Response: Opened file stream
+
+        Raises:
+            HTTPError: If an HTTP error occurs.
+        """
+        response = requests.request('get', url, stream=True, **kwargs)
+        response.raise_for_status()
+
+        return response
 
     @staticmethod
     def render_html(template_name, **kwargs):  # pragma: no cover

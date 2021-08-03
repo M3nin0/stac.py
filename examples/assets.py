@@ -20,7 +20,7 @@ class Assets(UserDict):
         if not isinstance(data, collections.abc.Mapping):
             raise ValueError('data parameter must be a mapping.')
 
-        data = {k: Asset(v) for k, v in data}
+        data = {k: Asset(v) for k, v in data.items()}
 
         super(Assets, self).__init__(data)
 

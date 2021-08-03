@@ -8,6 +8,9 @@ from examples.extent import Extent
 from examples.providers import Providers
 from examples.relation import RelationType
 
+from examples.links import Links
+from examples._utils import Utils
+
 
 class Collection(BaseContainer):
     """STAC Collection class."""
