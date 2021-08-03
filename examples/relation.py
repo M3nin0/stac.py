@@ -6,6 +6,7 @@ class RelationType(Enum):
     ALTERNATE = 'alternate'
     CANONICAL = 'canonical'
     CHILD = 'child'
+    COLLECTION = 'collection'
     CONFORMANCE = 'conformance'
     DATA = 'data'
     DERIVED_FROM = 'derived_from'
