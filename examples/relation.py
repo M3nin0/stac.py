@@ -18,7 +18,7 @@ class RelationType(Enum):
     DATA = 'data'
     DERIVED_FROM = 'derived_from'
     DOCS = 'docs'
-    ITEM = 'item'
+    ITEM = 'items'  # ToDo: Check if we need to use `item` or `items`
     LICENSE = 'license'
     NEXT = 'next'
     PARENT = 'parent'
@@ -28,7 +28,6 @@ class RelationType(Enum):
     SEARCH = 'search'
     SELF = 'self'
     VIA = 'via'
-
 
     def __str__(self):
         return self.value
